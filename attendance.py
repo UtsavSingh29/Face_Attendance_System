@@ -6,16 +6,14 @@ import os
 import uuid
 import re
 
-# Predefined Admin Credentials
-ADMIN_USERNAME = "a"
-ADMIN_PASSWORD = "1"
+ADMIN_USERNAME = "adminname"
+ADMIN_PASSWORD = "adminpass"
 
-# MySQL Database Configuration
 MYSQL_CONFIG = {
     "host": "localhost",
     "user": "root",
-    "password": "okucan123",
-    "database": "CameraAttendance"
+    "password": "pass of ur root",
+    "database": "database name"
 }
 
 def setup_db():
@@ -340,7 +338,6 @@ def open_admin_portal():
     approval_container.grid_rowconfigure(0, weight=1)
 
     def update_user_lists():
-        # Clear only the contents of the frames
         for widget in student_label_frame.winfo_children():
             widget.destroy()
         for widget in teacher_label_frame.winfo_children():
@@ -352,7 +349,6 @@ def open_admin_portal():
             cursor.execute("SELECT username, role, group_name FROM users WHERE approved=0")
             users = cursor.fetchall()
 
-            # Debug: Log fetched users
             print(f"Fetched {len(users)} pending users: {users}")
 
             student_users = [u for u in users if u[1] == "Student"]
@@ -367,7 +363,6 @@ def open_admin_portal():
                     ttk.Label(row, text=f"{username} (Group: {group})", width=30, anchor="w").pack(side="left")
                     ttk.Button(row, text="Approve", command=lambda u=username: approve_user(u), style='Primary.TButton').pack(side="left", padx=2)
                     ttk.Button(row, text="Decline", command=lambda u=username: decline_user(u), style='Danger.TButton').pack(side="left", padx=2)
-                # Frame for Approve All and Decline All buttons
                 button_frame = ttk.Frame(student_label_frame)
                 button_frame.pack(pady=10)
                 ttk.Button(button_frame, text="Approve All Students", command=lambda: approve_all("Student"), style='Primary.TButton').pack(side="left", padx=5)
@@ -382,7 +377,6 @@ def open_admin_portal():
                     ttk.Label(row, text=f"{username} (Group: {group})", width=30, anchor="w").pack(side="left")
                     ttk.Button(row, text="Approve", command=lambda u=username: approve_user(u), style='Primary.TButton').pack(side="left", padx=5)
                     ttk.Button(row, text="Decline", command=lambda u=username: decline_user(u), style='Danger.TButton').pack(side="left", padx=5)
-                # Frame for Approve All and Decline All buttons
                 button_frame = ttk.Frame(teacher_label_frame)
                 button_frame.pack(pady=10)
                 ttk.Button(button_frame, text="Approve All Teachers", command=lambda: approve_all("Teacher"), style='Primary.TButton').pack(side="left", padx=5)
@@ -418,7 +412,6 @@ def open_admin_portal():
             print(f"Attempting to decline user: {username}")
             cursor.execute("DELETE FROM users WHERE username=%s", (username,))
             conn.commit()
-            # Debug: Verify remaining users
             cursor.execute("SELECT username, role, group_name FROM users WHERE approved=0")
             remaining = cursor.fetchall()
             print(f"Remaining pending users after decline: {remaining}")
