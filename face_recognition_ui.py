@@ -80,7 +80,7 @@ tk.Label(window, text="Welcome to CamAttend", bg="#1c1c1c", fg="blue",
 # Icons
 ri = ImageTk.PhotoImage(Image.open("UI_Image/register.png"))
 ai = ImageTk.PhotoImage(Image.open("UI_Image/attendance.png"))
-vi = ImageTk.PhotoImage(Image.open("UI_Image/verifyy.png"))
+vi = ImageTk.PhotoImage(Image.open("UI_Image/verifyy.png")) 
 Label(window, image=ri).place(x=100, y=270)
 Label(window, image=ai).place(x=980, y=270)
 Label(window, image=vi).place(x=600, y=270)
