@@ -7,7 +7,7 @@ import numpy as np
 import tkinter as tk
 from tkinter import *
 
-def subjectchoose(text_to_speech):
+def subjectchoose(text_to_speech, group_filter=None):
     def calculate_attendance():
         Subject = tx.get().strip()
         if Subject == "":
@@ -20,7 +20,7 @@ def subjectchoose(text_to_speech):
             text_to_speech(f"No attendance files found for subject: {Subject}")
             return
         
-        df_list = [pd.read_csv(f, dtype={'Name': str}) for f in filenames]  # Ensure "Name" is read as string
+        df_list = [pd.read_csv(f, dtype={'Name': str}) for f in filenames]
         newdf = df_list[0]
 
         for i in range(1, len(df_list)):
@@ -28,30 +28,41 @@ def subjectchoose(text_to_speech):
 
         newdf.fillna(0, inplace=True)
 
+        # Apply group filter if provided
+        if group_filter and 'Group' in newdf.columns:
+            newdf = newdf[newdf['Group'] == group_filter]
+            if newdf.empty:
+                text_to_speech(f"No attendance records found for group {group_filter}")
+                return
+
         # Ensure 'Name' column remains a clean string
         if 'Name' in newdf.columns:
-            newdf['Name'] = newdf['Name'].astype(str)  # Convert to string
-            newdf['Name'] = newdf['Name'].str.replace(r"[\[\]']", "", regex=True)  # Remove brackets and quotes ✅
+            newdf['Name'] = newdf['Name'].astype(str)
+            newdf['Name'] = newdf['Name'].str.replace(r"[\[\]']", "", regex=True)
 
         # Convert all other columns (except "Enrollment" and "Name") to numeric
-        for col in newdf.columns[2:]:  # Skip Enrollment and Name
-            newdf[col] = pd.to_numeric(newdf[col], errors='coerce')
+        for col in newdf.columns[2:]:
+            if col != 'Group':  # Skip Group column from calculation
+                newdf[col] = pd.to_numeric(newdf[col], errors='coerce')
 
         # Initialize Attendance column
         newdf["Attendance"] = "0%"
 
         for i in range(len(newdf)):
-            numeric_cols = newdf.iloc[i, 2:-1]  # Skip Enrollment and Name, but take numeric columns
-
+            numeric_cols = newdf.iloc[i, 2:-1]  # Skip Enrollment, Name and Group
+            
+            # Exclude non-numeric columns from calculation
+            numeric_cols = numeric_cols.select_dtypes(include=[np.number])
+            
             mean_attendance = numeric_cols.mean()
-            if not np.isnan(mean_attendance):  # Check if mean is valid
+            if not np.isnan(mean_attendance):
                 newdf.at[i, "Attendance"] = f"{int(round(mean_attendance * 100))}%"
 
         output_path = f"Attendance\\{Subject}\\attendance.csv"
         newdf.to_csv(output_path, index=False)
 
         root = Toplevel(subject)
-        root.title(f"Attendance of {Subject}")
+        root.title(f"Attendance of {Subject}" + (f" (Group: {group_filter})" if group_filter else ""))
         root.configure(background="black")
 
         with open(output_path) as file:
@@ -59,7 +70,7 @@ def subjectchoose(text_to_speech):
             for r, row in enumerate(reader):
                 for c, cell in enumerate(row):
                     label = tkinter.Label(
-                        root, text=cell, width=15, height=1,  # Increased width for names
+                        root, text=cell, width=15, height=1,
                         fg="yellow", font=("times", 15, "bold"),
                         bg="black", relief=tkinter.RIDGE
                     )
@@ -73,7 +84,17 @@ def subjectchoose(text_to_speech):
         if sub == "":
             text_to_speech("Please enter the subject name!!!")
         else:
-            os.startfile(f"Attendance\\{sub}")
+            path = f"Attendance\\{sub}"
+            if group_filter:
+                path = os.path.join(path, f"{sub}_{group_filter}_*.csv")
+            else:
+                path = os.path.join(path, f"{sub}_*.csv")
+            
+            files = glob(path)
+            if not files:
+                text_to_speech(f"No attendance sheets found for {sub}" + (f" group {group_filter}" if group_filter else ""))
+            else:
+                os.startfile(f"Attendance\\{sub}")
 
     subject = Tk()
     subject.title("Subject...")
@@ -81,7 +102,8 @@ def subjectchoose(text_to_speech):
     subject.resizable(0, 0)
     subject.configure(background="black")
 
-    tk.Label(subject, text="Which Subject of Attendance?", bg="black", fg="green", font=("arial", 25)).place(x=100, y=12)
+    title_text = "Which Subject of Attendance?" + (f" (Group: {group_filter})" if group_filter else "")
+    tk.Label(subject, text=title_text, bg="black", fg="green", font=("arial", 25)).place(x=100, y=12)
 
     tk.Label(subject, text="Enter Subject", width=10, height=2, bg="black", fg="yellow", bd=5, relief=RIDGE, font=("times new roman", 15)).place(x=50, y=100)
 

@@ -1,68 +1,94 @@
 import csv
-import os, cv2
-import numpy as np
-import pandas as pd
-import datetime
-import time
+import os
+import cv2
 
-def TakeImage(l1, l2, haarcasecade_path, trainimage_path, message, err_screen,text_to_speech):
-    if (l1 == "") and (l2==""):
-        t='Please Enter the your Enrollment Number and Name.'
+def TakeImage(l1, l2, l3, haarcasecade_path, trainimage_path, message, err_screen, text_to_speech):
+    # Input validation
+    if not l1 and not l2:
+        t = 'Please Enter your Enrollment Number and Name.'
         text_to_speech(t)
-    elif l1=='':
-        t='Please Enter the your Enrollment Number.'
+        err_screen()
+        return
+    elif not l1:
+        t = 'Please Enter your Enrollment Number.'
         text_to_speech(t)
-    elif l2 == "":
-        t='Please Enter the your Name.'
+        err_screen()
+        return
+    elif not l2:
+        t = 'Please Enter your Name.'
         text_to_speech(t)
-    else:
-        try:
-            cam = cv2.VideoCapture(0)
+        err_screen()
+        return
+    elif not l3:
+        t = 'Please Enter your Group.'
+        text_to_speech(t)
+        err_screen()
+        return
 
-            # Set full-screen mode
-            cv2.namedWindow("Frame", cv2.WND_PROP_FULLSCREEN)
-            cv2.setWindowProperty("Frame", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    try:
+        Enrollment = l1.strip()
+        Name = l2.strip()
+        Group = l3.strip()
+        directory = f"{Group}_{Enrollment}_{Name}"
+        path = os.path.join(trainimage_path, directory)
 
-            detector = cv2.CascadeClassifier(haarcasecade_path)
-            Enrollment = l1
-            Name = l2
-            sampleNum = 0
-            directory = Enrollment + "_" + Name
-            path = os.path.join(trainimage_path, directory)
-            os.mkdir(path)
+        # Skip if folder already exists
+        if os.path.exists(path):
+            t = "Student data already exists."
+            message.configure(text=t)
+            text_to_speech(t)
+            return
 
-            while True:
-                ret, img = cam.read()
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                faces = detector.detectMultiScale(gray, 1.3, 5)
-                for (x, y, w, h) in faces:
-                    cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
-                    sampleNum += 1
-                    cv2.imwrite(
-                        f"{path}\\{Name}_{Enrollment}_{str(sampleNum)}.jpg",
-                        gray[y : y + h, x : x + w],
-                    )
-                cv2.imshow("Frame", img)
-                
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
-                elif sampleNum > 50:
-                    break
+        os.makedirs(path)
 
-            cam.release()
-            cv2.destroyAllWindows()
+        cam = cv2.VideoCapture(0)
+        cv2.namedWindow("Frame", cv2.WND_PROP_FULLSCREEN)
+        cv2.setWindowProperty("Frame", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
-            row = [Enrollment, Name]
-            with open(
-                "StudentDetails/studentdetails.csv",
-                "a+",
-            ) as csvFile:
-                writer = csv.writer(csvFile, delimiter=",")
-                writer.writerow(row)
-                csvFile.close()
-            res = "Images Saved for ER No:" + Enrollment + " Name:" + Name
-            message.configure(text=res)
-            text_to_speech(res)
-        except FileExistsError as F:
-            F = "Student Data already exists"
-            text_to_speech(F)
+        detector = cv2.CascadeClassifier(haarcasecade_path)
+        sampleNum = 0
+
+        while True:
+            ret, img = cam.read()
+            if not ret:
+                break
+
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            faces = detector.detectMultiScale(gray, 1.3, 5)
+
+            for (x, y, w, h) in faces:
+                sampleNum += 1
+                face_img = gray[y:y + h, x:x + w]
+                cv2.imwrite(f"{path}\\{Group}_{Name}_{Enrollment}_{sampleNum}.jpg", face_img)
+                cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+
+            cv2.imshow("Frame", img)
+
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+            elif sampleNum >= 50:
+                break
+
+        cam.release()
+        cv2.destroyAllWindows()
+
+        # Ensure StudentDetails directory exists
+        os.makedirs("StudentDetails", exist_ok=True)
+
+        # Save details to CSV
+        file_path = "StudentDetails/studentdetails.csv"
+        file_exists = os.path.isfile(file_path)
+        with open(file_path, "a+", newline='') as csvFile:
+            writer = csv.writer(csvFile)
+            if not file_exists:
+                writer.writerow(["Enrollment", "Name", "Group"])
+            writer.writerow([Enrollment, Name, Group])
+
+        res = f"Images Saved for:\nER No: {Enrollment}\nName: {Name}\nGroup: {Group}"
+        message.configure(text=res)
+        text_to_speech(res)
+
+    except Exception as e:
+        t = f"Error: {str(e)}"
+        message.configure(text=t)
+        text_to_speech(t)
