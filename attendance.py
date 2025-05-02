@@ -5,16 +5,36 @@ from mysql.connector import Error
 import os
 import uuid
 import re
+import pyttsx3
+import shutil 
 
-ADMIN_USERNAME = "adminname"
-ADMIN_PASSWORD = "adminpass"
+# project module
+import show_attendance
+import takeImage
+import trainImage
+import automaticAttendance
 
+# Predefined Admin Credentials
+ADMIN_USERNAME = "a"
+ADMIN_PASSWORD = "1"
+
+# MySQL Database Configurations
 MYSQL_CONFIG = {
     "host": "localhost",
     "user": "root",
-    "password": "pass of ur root",
-    "database": "database name"
+    "password": "shoibk897",
+    "database": "CameraAttendance"
 }
+
+
+def text_to_speech(user_text):
+    engine = pyttsx3.init()
+    engine.say(user_text)
+    engine.runAndWait()
+
+haarcasecade_path = "haarcascade_frontalface_default.xml"
+trainimagelabel_path = "./TrainingImageLabel/Trainner.yml"
+trainimage_path = "./TrainingImage"
 
 def setup_db():
     try:
@@ -36,7 +56,10 @@ def setup_db():
                             user_id VARCHAR(50) NOT NULL,
                             group_name VARCHAR(255) NOT NULL,
                             date VARCHAR(50) NOT NULL,
-                            status VARCHAR(50) NOT NULL
+                            status VARCHAR(50) NOT NULL,
+                            subject VARCHAR(255) NOT NULL,
+                            attendance_count INTEGER DEFAULT 1,
+                            timestamp VARCHAR(50)
                         )''')
         
         conn.commit()
@@ -101,11 +124,11 @@ def fetch_attendance(username=None, group=None):
         cursor = conn.cursor()
         
         if username:
-            cursor.execute("SELECT date, status FROM attendance WHERE username=%s", (username,))
+            cursor.execute("SELECT date, status, subject, attendance_count FROM attendance WHERE user_id=(SELECT user_id FROM users WHERE username=%s)", (username,))
         elif group:
-            cursor.execute("SELECT username, date, status FROM attendance WHERE group_name=%s", (group,))
+            cursor.execute("SELECT u.username, a.date, a.status, a.subject, a.attendance_count FROM attendance a JOIN users u ON a.user_id=u.user_id WHERE a.group_name=%s", (group,))
         else:
-            cursor.execute("SELECT * FROM attendance")
+            cursor.execute("SELECT u.username, a.date, a.status, a.subject, a.attendance_count FROM attendance a JOIN users u ON a.user_id=u.user_id")
         
         records = cursor.fetchall()
         return records
@@ -530,9 +553,10 @@ def open_teacher_dashboard(username):
     ttk.Label(main_frame, text=f"Group Admin for: {teacher_group}", font=("Verdana", 18)).pack(pady=10)
 
     def take_group_attendance():
-        os.system(f"python face_recognition_ui.py --group {teacher_group}")
+        os.system(f"python face_recognition.py --teacher_username {username} --group_name {teacher_group}")
 
     def manage_group_members():
+        
         manage_window = tk.Toplevel(root)
         manage_window.title("Manage Group Members")
         manage_window.state('zoomed')
@@ -541,7 +565,7 @@ def open_teacher_dashboard(username):
         try:
             conn = mysql.connector.connect(**MYSQL_CONFIG)
             cursor = conn.cursor()
-            cursor.execute("SELECT username, role, approved FROM users WHERE group_name=%s", (teacher_group,))
+            cursor.execute("SELECT username, role, approved, user_id FROM users WHERE group_name=%s", (teacher_group,))
             members = cursor.fetchall()
             
             canvas = tk.Canvas(manage_window, bg='#f0f0f0')
@@ -556,18 +580,43 @@ def open_teacher_dashboard(username):
             canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
             canvas.configure(yscrollcommand=scrollbar.set)
 
-            ttk.Label(scrollable_frame, text="Username", width=20, anchor="w", font=("Verdana", 12, "bold")).grid(row=0, column=0, padx=5, pady=5)
-            ttk.Label(scrollable_frame, text="Role", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=1, padx=5, pady=5)
-            ttk.Label(scrollable_frame, text="Approved", width=10, anchor="w", font=('Verdana', 12, 'bold')).grid(row=0, column=2, padx=5, pady=5)
-            ttk.Label(scrollable_frame, text="Action", width=10, anchor="w", font=('Verdana', 12, 'bold')).grid(row=0, column=3, padx=5, pady=5)
+            # Headings for student and other members
+            student_frame = ttk.Frame(scrollable_frame)
+            teacher_frame = ttk.Frame(scrollable_frame)
 
-            for i, (user, role, approved) in enumerate(members, start=1):
-                approved_text = "Yes" if approved else "No"
-                ttk.Label(scrollable_frame, text=user, width=20, anchor="w").grid(row=i, column=0, padx=5, pady=5)
-                ttk.Label(scrollable_frame, text=role, width=10, anchor="w").grid(row=i, column=1, padx=5, pady=5)
-                ttk.Label(scrollable_frame, text=approved_text, width=10, anchor="w").grid(row=i, column=2, padx=5, pady=5)
-                if user != username:
-                    ttk.Button(scrollable_frame, text="Remove", command=lambda u=user: remove_user(u, manage_window), style='Danger.TButton').grid(row=i, column=3, padx=5, pady=5)
+            student_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nw")
+            teacher_frame.grid(row=0, column=1, padx=10, pady=10, sticky="ne")
+
+            # Student Table Headers
+            ttk.Label(student_frame, text="Roll No", width=20, anchor="w", font=("Verdana", 12, "bold")).grid(row=0, column=0, padx=5, pady=5)
+            ttk.Label(student_frame, text="Username", width=20, anchor="w", font=("Verdana", 12, "bold")).grid(row=0, column=1, padx=5, pady=5)
+            ttk.Label(student_frame, text="Approved", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=2, padx=5, pady=5)
+            ttk.Label(student_frame, text="Action", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=3, padx=5, pady=5)
+            ttk.Label(student_frame, text="Train", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=4, padx=5, pady=5)
+
+            # Teacher Table Headers
+            ttk.Label(teacher_frame, text="Username", width=20, anchor="w", font=("Verdana", 12, "bold")).grid(row=0, column=0, padx=5, pady=5)
+            ttk.Label(teacher_frame, text="Role", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=1, padx=5, pady=5)
+           
+            student_row = 1
+            teacher_row = 1
+
+            for user, role, approved, user_id in members:
+               approved_text = "Yes" if approved else "No"
+               if role.lower() == "student":
+                   ttk.Label(student_frame, text=user_id, width=20, anchor="w").grid(row=student_row, column=0, padx=5, pady=5)
+                   ttk.Label(student_frame, text=user, width=20, anchor="w").grid(row=student_row, column=1, padx=5, pady=5)
+                   ttk.Label(student_frame, text=approved_text, width=10, anchor="w").grid(row=student_row, column=2, padx=5, pady=5)
+                   if user != username:
+                       ttk.Button(student_frame, text="Remove", command=lambda u=user: remove_user(u, manage_window), style='Danger.TButton').grid(row=student_row, column=3, padx=5, pady=5)
+                       ttk.Button(student_frame, text="Train Image", command=lambda rn=user_id: take_and_train_image(rn), style='Success.TButton').grid(row=student_row, column=4, padx=5, pady=5)
+                   student_row += 1
+               else:
+                   ttk.Label(teacher_frame, text=user, width=20, anchor="w").grid(row=teacher_row, column=0, padx=5, pady=5)
+                   ttk.Label(teacher_frame, text=role, width=10, anchor="w").grid(row=teacher_row, column=1, padx=5, pady=5)
+                   teacher_row += 1
+
+
 
             canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
             scrollbar.pack(side="right", fill="y")
@@ -577,6 +626,24 @@ def open_teacher_dashboard(username):
             if conn.is_connected():
                 cursor.close()
                 conn.close()
+                
+    def take_and_train_image(roll_no):
+        image_taken = takeImage.TakeImage(
+            roll_no,
+            teacher_group,
+            haarcasecade_path,
+            trainimage_path,
+            text_to_speech
+        )
+        if image_taken:
+            trainImage.TrainImage(
+                haarcasecade_path,
+                trainimage_path,
+                trainimagelabel_path,
+                text_to_speech,
+            )
+        else:
+            text_to_speech("ERROR IN CAPTURING IMAGE")
 
     def remove_user(username_to_remove, window):
         confirm = messagebox.askyesno("Confirm", f"Remove {username_to_remove} from group?")
@@ -584,8 +651,18 @@ def open_teacher_dashboard(username):
             try:
                 conn = mysql.connector.connect(**MYSQL_CONFIG)
                 cursor = conn.cursor()
+                
+                cursor.execute("SELECT user_id FROM users WHERE username=%s", (username_to_remove,))
+                result = cursor.fetchone()
+                user_id = result[0]
+                user_folder_path = os.path.join(trainimage_path, user_id)
+
                 cursor.execute("DELETE FROM users WHERE username=%s", (username_to_remove,))
                 conn.commit()
+                
+                if os.path.exists(user_folder_path):
+                    shutil.rmtree(user_folder_path)
+                
                 messagebox.showinfo("Removed", f"{username_to_remove} has been removed.")
                 window.destroy()
                 manage_group_members()
@@ -676,7 +753,7 @@ def open_student_dashboard(username):
         ttk.Label(main_frame, text=f"Group: {student_group}", font=("Verdana", 18)).pack(pady=10)
         
         attendance_records = fetch_attendance(username)
-        attendance_text = "Date\tStatus\n" + "\n".join([f"{date}\t{status}" for date, status in attendance_records])
+        attendance_text = "Date\tStatus\tSubject\tCount\n" + "\n".join([f"{date}\t{status}\t{subject}\t{count}" for date, status, subject, count in attendance_records])
         attendance_label = ttk.Label(main_frame, text=attendance_text, font=("Verdana", 14), justify='left')
         attendance_label.pack(pady=20)
     except Error as e:

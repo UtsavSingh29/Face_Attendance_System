@@ -18,6 +18,7 @@ Time = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
 Hour, Minute, Second = timeStamp.split(":")
 d = {}
 index = 0
+####GUI for manually fill attendance
 def manually_fill():
     global sb
     sb = tk.Tk()
@@ -56,6 +57,8 @@ def manually_fill():
         ).place(x=90, y=50)
 
     def fill_attendance():
+
+        ##Create table for Attendance
         global subb
         subb = SUB_ENTRY.get()
 
@@ -148,6 +151,9 @@ def manually_fill():
 
             def remove_student():
                 STUDENT_ENTRY.delete(first=0, last=22)
+
+            ####get important variable
+
             def enter_data_DB():
                 global index
                 global d

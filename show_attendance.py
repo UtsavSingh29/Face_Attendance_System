@@ -1,117 +1,237 @@
-import pandas as pd
-from glob import glob
-import os
-import tkinter
-import csv
-import numpy as np
 import tkinter as tk
 from tkinter import *
+import mysql.connector
+from mysql.connector import Error
+from tkinter import ttk
 
-def subjectchoose(text_to_speech, group_filter=None):
+# MySQL Database Configuration
+MYSQL_CONFIG = {
+    "host": "localhost",
+    "user": "root",
+    "password": "shoibk897",
+    "database": "CameraAttendance"
+}
+
+def subjectchoose(text_to_speech, group_name=""):
+    def setup_styles():
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TButton', font=('Verdana', 12), padding=10)
+        style.configure('TLabel', font=('Verdana', 14), background='black', foreground='yellow')
+        style.configure('TEntry', font=('Verdana', 12), fieldbackground='#333333', foreground='yellow')
+        style.configure('Primary.TButton', background='#4CAF50', foreground='white')
+        style.map('Primary.TButton', background=[('active', '#45a049')])
+
     def calculate_attendance():
-        Subject = tx.get().strip()
-        if Subject == "":
-            text_to_speech("Please enter the subject name.")
-            return
-
-        filenames = glob(f"Attendance\\{Subject}\\{Subject}*.csv")
-
-        if not filenames:
-            text_to_speech(f"No attendance files found for subject: {Subject}")
+        subject = tx.get().strip()
+        if subject == "":
+            t = "Please enter the subject name."
+            text_to_speech(t)
+            notifica.configure(text=t, style='TLabel')
             return
         
-        df_list = [pd.read_csv(f, dtype={'Name': str}) for f in filenames]
-        newdf = df_list[0]
-
-        for i in range(1, len(df_list)):
-            newdf = newdf.merge(df_list[i], how="outer")
-
-        newdf.fillna(0, inplace=True)
-
-        # Apply group filter if provided
-        if group_filter and 'Group' in newdf.columns:
-            newdf = newdf[newdf['Group'] == group_filter]
-            if newdf.empty:
-                text_to_speech(f"No attendance records found for group {group_filter}")
+        try:
+            conn = mysql.connector.connect(**MYSQL_CONFIG)
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT a.user_id, u.username, a.date, a.subject, a.status, a.attendance_count
+                FROM attendance a
+                JOIN users u ON a.user_id = u.user_id
+                WHERE a.subject=%s AND a.group_name=%s
+                ORDER BY a.date DESC
+            """
+            cursor.execute(query, (subject, group_name))
+            records = cursor.fetchall()
+            
+            if not records:
+                t = f"No attendance records found for {subject} in group {group_name}."
+                text_to_speech(t)
+                notifica.configure(text=t, style='TLabel')
                 return
-
-        # Ensure 'Name' column remains a clean string
-        if 'Name' in newdf.columns:
-            newdf['Name'] = newdf['Name'].astype(str)
-            newdf['Name'] = newdf['Name'].str.replace(r"[\[\]']", "", regex=True)
-
-        # Convert all other columns (except "Enrollment" and "Name") to numeric
-        for col in newdf.columns[2:]:
-            if col != 'Group':  # Skip Group column from calculation
-                newdf[col] = pd.to_numeric(newdf[col], errors='coerce')
-
-        # Initialize Attendance column
-        newdf["Attendance"] = "0%"
-
-        for i in range(len(newdf)):
-            numeric_cols = newdf.iloc[i, 2:-1]  # Skip Enrollment, Name and Group
             
-            # Exclude non-numeric columns from calculation
-            numeric_cols = numeric_cols.select_dtypes(include=[np.number])
+            root = tk.Tk()
+            root.title(f"Attendance of {subject} for Group {group_name}")
+            root.configure(background="black")
+            root.state('zoomed')
             
-            mean_attendance = numeric_cols.mean()
-            if not np.isnan(mean_attendance):
-                newdf.at[i, "Attendance"] = f"{int(round(mean_attendance * 100))}%"
-
-        output_path = f"Attendance\\{Subject}\\attendance.csv"
-        newdf.to_csv(output_path, index=False)
-
-        root = Toplevel(subject)
-        root.title(f"Attendance of {Subject}" + (f" (Group: {group_filter})" if group_filter else ""))
-        root.configure(background="black")
-
-        with open(output_path) as file:
-            reader = csv.reader(file)
-            for r, row in enumerate(reader):
-                for c, cell in enumerate(row):
-                    label = tkinter.Label(
-                        root, text=cell, width=15, height=1,
-                        fg="yellow", font=("times", 15, "bold"),
-                        bg="black", relief=tkinter.RIDGE
+            headers = ["User ID", "Username", "Date", "Subject", "Status", "Count"]
+            for c, header in enumerate(headers):
+                label = tk.Label(
+                    root,
+                    width=15,
+                    height=1,
+                    fg="yellow",
+                    font=("times", 15, "bold"),
+                    bg="black",
+                    text=header,
+                    relief=tk.RIDGE,
+                )
+                label.grid(row=0, column=c)
+            
+            for r, record in enumerate(records, start=1):
+                for c, field in enumerate(record):
+                    label = tk.Label(
+                        root,
+                        width=15,
+                        height=1,
+                        fg="yellow",
+                        font=("times", 15, "bold"),
+                        bg="black",
+                        text=str(field),
+                        relief=tk.RIDGE,
                     )
                     label.grid(row=r, column=c)
-
-        root.mainloop()
-        print(newdf)
-
-    def Attf():
-        sub = tx.get().strip()
-        if sub == "":
-            text_to_speech("Please enter the subject name!!!")
-        else:
-            path = f"Attendance\\{sub}"
-            if group_filter:
-                path = os.path.join(path, f"{sub}_{group_filter}_*.csv")
-            else:
-                path = os.path.join(path, f"{sub}_*.csv")
             
-            files = glob(path)
-            if not files:
-                text_to_speech(f"No attendance sheets found for {sub}" + (f" group {group_filter}" if group_filter else ""))
-            else:
-                os.startfile(f"Attendance\\{sub}")
+            root.mainloop()
+        
+        except Error as e:
+            t = f"Database Error: {e}"
+            text_to_speech(t)
+            notifica.configure(text=t, style='TLabel')
+        finally:
+            if conn.is_connected():
+                cursor.close()
+                conn.close()
 
-    subject = Tk()
+    def view_all_subjects():
+        try:
+            conn = mysql.connector.connect(**MYSQL_CONFIG)
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                "SELECT DISTINCT subject FROM attendance WHERE group_name=%s",
+                (group_name,)
+            )
+            subjects = cursor.fetchall()
+            
+            if not subjects:
+                t = f"No subjects found for group {group_name}."
+                text_to_speech(t)
+                notifica.configure(text=t, style='TLabel')
+                return
+            
+            root = tk.Tk()
+            root.title(f"All Subjects for Group {group_name}")
+            root.configure(background="black")
+            root.state('zoomed')
+            
+            for r, subject in enumerate(subjects, start=0):
+                label = tk.Label(
+                    root,
+                    width=20,
+                    height=1,
+                    fg="yellow",
+                    font=("times", 15, "bold"),
+                    bg="black",
+                    text=subject[0],
+                    relief=tk.RIDGE,
+                )
+                label.grid(row=r, column=0)
+            
+            root.mainloop()
+        
+        except Error as e:
+            t = f"Database Error: {e}"
+            text_to_speech(t)
+            notifica.configure(text=t, style='TLabel')
+        finally:
+            if conn.is_connected():
+                cursor.close()
+                conn.close()
+
+    def check_sheets():
+        subject = tx.get().strip()
+        if subject == "":
+            t = "Please enter the subject name!"
+            text_to_speech(t)
+            notifica.configure(text=t, style='TLabel')
+        else:
+            try:
+                conn = mysql.connector.connect(**MYSQL_CONFIG)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT DISTINCT subject FROM attendance WHERE group_name=%s AND subject=%s",
+                    (group_name, subject)
+                )
+                if cursor.fetchone():
+                    t = f"Subject {subject} exists in group {group_name}."
+                    text_to_speech(t)
+                    notifica.configure(text=t, style='TLabel')
+                else:
+                    t = f"No records for {subject} in group {group_name}."
+                    text_to_speech(t)
+                    notifica.configure(text=t, style='TLabel')
+            except Error as e:
+                t = f"Database Error: {e}"
+                text_to_speech(t)
+                notifica.configure(text=t, style='TLabel')
+            finally:
+                if conn.is_connected():
+                    cursor.close()
+                    conn.close()
+
+    subject = tk.Tk()
+    setup_styles()
     subject.title("Subject...")
-    subject.geometry("580x320")
-    subject.resizable(0, 0)
+    subject.state('zoomed')
     subject.configure(background="black")
 
-    title_text = "Which Subject of Attendance?" + (f" (Group: {group_filter})" if group_filter else "")
-    tk.Label(subject, text=title_text, bg="black", fg="green", font=("arial", 25)).place(x=100, y=12)
+    titl = tk.Label(subject, bg="black", relief=RIDGE, bd=10, font=("arial", 30))
+    titl.pack(fill=X)
+    ttk.Label(
+        subject,
+        text=f"Which Subject for Group {group_name}?",
+        style='TLabel',
+        font=("arial", 25),
+    ).place(relx=0.5, y=12, anchor='n')
 
-    tk.Label(subject, text="Enter Subject", width=10, height=2, bg="black", fg="yellow", bd=5, relief=RIDGE, font=("times new roman", 15)).place(x=50, y=100)
+    notifica = ttk.Label(
+        subject,
+        text="",
+        style='TLabel',
+        width=40,
+    )
+    notifica.place(relx=0.5, rely=0.8, anchor='center')
 
-    tx = tk.Entry(subject, width=15, bd=5, bg="black", fg="yellow", relief=RIDGE, font=("times", 30, "bold"))
-    tx.place(x=190, y=100)
+    main_frame = ttk.Frame(subject)
+    main_frame.place(relx=0.5, rely=0.5, anchor='center')
 
-    tk.Button(subject, text="Check Sheets", command=Attf, bd=7, font=("times new roman", 15), bg="black", fg="yellow", height=2, width=10, relief=RIDGE).place(x=360, y=170)
+    ttk.Label(
+        main_frame,
+        text="Enter Subject",
+        style='TLabel',
+    ).grid(row=0, column=0, padx=10, pady=10, sticky='e')
 
-    tk.Button(subject, text="View Attendance", command=calculate_attendance, bd=7, font=("times new roman", 15), bg="black", fg="yellow", height=2, width=12, relief=RIDGE).place(x=195, y=170)
+    tx = ttk.Entry(
+        main_frame,
+        width=20,
+        style='TEntry',
+    )
+    tx.grid(row=0, column=1, padx=10, pady=10)
+
+    button_frame = ttk.Frame(main_frame)
+    button_frame.grid(row=1, column=0, columnspan=2, pady=10)
+
+    ttk.Button(
+        button_frame,
+        text="View Attendance",
+        command=calculate_attendance,
+        style='Primary.TButton',
+    ).pack(side="left", padx=10)
+
+    ttk.Button(
+        button_frame,
+        text="Check Sheets",
+        command=check_sheets,
+        style='Primary.TButton',
+    ).pack(side="left", padx=10)
+
+    ttk.Button(
+        button_frame,
+        text="All Subjects",
+        command=view_all_subjects,
+        style='Primary.TButton',
+    ).pack(side="left", padx=10)
 
     subject.mainloop()
