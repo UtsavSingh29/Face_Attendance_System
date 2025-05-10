@@ -1,0 +1,29 @@
+CREATE TABLE users (
+    user_id VARCHAR(50) PRIMARY KEY,
+    username VARCHAR(255) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    group_name VARCHAR(255) NOT NULL,
+    approved INT DEFAULT 0
+);
+
+
+CREATE TABLE attendance_session (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    teacher_id VARCHAR(50) NOT NULL,
+    subject_name VARCHAR(255) NOT NULL,
+    group_name INT NOT NULL,
+    session_count INT NOT NULL,
+    INDEX (teacher_id)
+);
+
+CREATE TABLE attendance (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    session_id INT NOT NULL,
+    student_id VARCHAR(50) NOT NULL,
+    status TINYINT NOT NULL,
+    date DATE NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES attendance_session(id)
+);
+
