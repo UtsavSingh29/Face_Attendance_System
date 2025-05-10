@@ -5,11 +5,10 @@ from mysql.connector import Error
 import tkinter as tk
 from tkinter import ttk
 
-# MySQL Database Configuration
 MYSQL_CONFIG = {
     "host": "localhost",
     "user": "root",
-    "password": "shoibk897",
+    "password": "okucan123",
     "database": "CameraAttendance"
 }
 
@@ -38,7 +37,6 @@ def TakeImage(user_id, teacher_group, haarcasecade_path, trainimage_path, text_t
         Enrollment = user_id
         Name = username
         
-        # Proceed with image capture
         cam = cv2.VideoCapture(0)
         detector = cv2.CascadeClassifier(haarcasecade_path)
         sampleNum = 0

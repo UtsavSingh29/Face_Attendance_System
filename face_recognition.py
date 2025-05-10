@@ -15,7 +15,6 @@ import pyttsx3
 import sys
 import getopt
 
-# Project modules
 import show_attendance
 import takeImage
 import trainImage
@@ -24,7 +23,7 @@ import automaticAttendance
 MYSQL_CONFIG = {
     "host": "localhost",
     "user": "root",
-    "password": "shoibk897",
+    "password": "okucan123",
     "database": "CameraAttendance"
 }
 
@@ -165,7 +164,6 @@ def main(argv):
             style='TLabel',
         ).grid(row=1, column=0, padx=10, pady=10, sticky='e')
         
-        # Fetch approved students in the group
         try:
             conn = mysql.connector.connect(**MYSQL_CONFIG)
             cursor = conn.cursor()

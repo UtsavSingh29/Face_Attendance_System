@@ -18,7 +18,6 @@ Time = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
 Hour, Minute, Second = timeStamp.split(":")
 d = {}
 index = 0
-####GUI for manually fill attendance
 def manually_fill():
     global sb
     sb = tk.Tk()
@@ -58,7 +57,6 @@ def manually_fill():
 
     def fill_attendance():
 
-        ##Create table for Attendance
         global subb
         subb = SUB_ENTRY.get()
 
@@ -102,7 +100,7 @@ def manually_fill():
                 ).place(x=90, y=50)
 
             def testVal(inStr, acttyp):
-                if acttyp == "1":  # insert
+                if acttyp == "1":  
                     if not inStr.isdigit():
                         return False
                 return True
@@ -152,7 +150,6 @@ def manually_fill():
             def remove_student():
                 STUDENT_ENTRY.delete(first=0, last=22)
 
-            ####get important variable
 
             def enter_data_DB():
                 global index
@@ -176,7 +173,6 @@ def manually_fill():
                         index += 1
                         ENR_ENTRY.delete(0, "end")
                         STUDENT_ENTRY.delete(0, "end")
-                    # TODO implement CSV code
                 print(d)
 
             def create_csv():
@@ -294,7 +290,6 @@ def manually_fill():
                 font=("times", 15, " bold "),
             )
             MAKE_CSV.place(x=570, y=300)
-            # TODO remove check sheet
             def attf():
                 import subprocess
 

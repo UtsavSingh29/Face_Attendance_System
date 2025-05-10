@@ -5,32 +5,25 @@ from mysql.connector import Error
 import os
 import uuid
 import re
-import pyttsx3
-import shutil 
+import shutil
+from datetime import date, datetime
+import threading
+from tkcalendar import DateEntry
 
-# project module
 import show_attendance
 import takeImage
 import trainImage
 import automaticAttendance
 
-# Predefined Admin Credentials
-ADMIN_USERNAME = "a"
-ADMIN_PASSWORD = "1"
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"
 
-# MySQL Database Configurations
 MYSQL_CONFIG = {
     "host": "localhost",
     "user": "root",
-    "password": "shoibk897",
+    "password": "okucan123",
     "database": "CameraAttendance"
 }
-
-
-def text_to_speech(user_text):
-    engine = pyttsx3.init()
-    engine.say(user_text)
-    engine.runAndWait()
 
 haarcasecade_path = "haarcascade_frontalface_default.xml"
 trainimagelabel_path = "./TrainingImageLabel/Trainner.yml"
@@ -42,8 +35,7 @@ def setup_db():
         cursor = conn.cursor()
         
         cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                            id INTEGER PRIMARY KEY AUTO_INCREMENT,
-                            user_id VARCHAR(50) UNIQUE NOT NULL,
+                            user_id VARCHAR(50) PRIMARY KEY,
                             username VARCHAR(255) UNIQUE NOT NULL,
                             password VARCHAR(255) NOT NULL,
                             role VARCHAR(50) NOT NULL,
@@ -51,16 +43,31 @@ def setup_db():
                             approved INTEGER DEFAULT 0
                         )''')
         
+        cursor.execute('''CREATE TABLE IF NOT EXISTS attendance_session (
+                            id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                            teacher_id VARCHAR(50) NOT NULL,
+                            subject_name VARCHAR(255) NOT NULL,
+                            group_name VARCHAR(255) NOT NULL,
+                            session_date DATE NOT NULL,
+                            session_count INTEGER NOT NULL,
+                            INDEX (teacher_id)
+                        )''')
+        
         cursor.execute('''CREATE TABLE IF NOT EXISTS attendance (
                             id INTEGER PRIMARY KEY AUTO_INCREMENT,
-                            user_id VARCHAR(50) NOT NULL,
-                            group_name VARCHAR(255) NOT NULL,
-                            date VARCHAR(50) NOT NULL,
-                            status VARCHAR(50) NOT NULL,
-                            subject VARCHAR(255) NOT NULL,
-                            attendance_count INTEGER DEFAULT 1,
-                            timestamp VARCHAR(50)
+                            session_id INTEGER NOT NULL,
+                            student_id VARCHAR(50) NOT NULL,
+                            status TINYINT NOT NULL,
+                            date DATE NOT NULL,
+                            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (session_id) REFERENCES attendance_session(id)
                         )''')
+        
+        try:
+            cursor.execute("ALTER TABLE attendance_session ADD COLUMN session_date DATE NOT NULL ")
+        except Error as e:
+            if e.errno != 1060:  
+                raise e
         
         conn.commit()
     except Error as e:
@@ -118,22 +125,129 @@ def check_login(username, password, role):
             cursor.close()
             conn.close()
 
-def fetch_attendance(username=None, group=None):
+def fetch_subjects(student_id=None, group_name=None):
     try:
         conn = mysql.connector.connect(**MYSQL_CONFIG)
         cursor = conn.cursor()
-        
-        if username:
-            cursor.execute("SELECT date, status, subject, attendance_count FROM attendance WHERE user_id=(SELECT user_id FROM users WHERE username=%s)", (username,))
-        elif group:
-            cursor.execute("SELECT u.username, a.date, a.status, a.subject, a.attendance_count FROM attendance a JOIN users u ON a.user_id=u.user_id WHERE a.group_name=%s", (group,))
+        if student_id:
+            cursor.execute("""
+                SELECT DISTINCT s.subject_name 
+                FROM attendance_session s
+                JOIN attendance a ON s.id = a.session_id
+                WHERE a.student_id=%s
+            """, (student_id,))
+        elif group_name:
+            cursor.execute("SELECT DISTINCT subject_name FROM attendance_session WHERE group_name=%s", (group_name,))
         else:
-            cursor.execute("SELECT u.username, a.date, a.status, a.subject, a.attendance_count FROM attendance a JOIN users u ON a.user_id=u.user_id")
-        
+            return []
+        subjects = [row[0] for row in cursor.fetchall()]
+        return sorted(subjects)
+    except Error as e:
+        messagebox.showerror("Database Error", f"Failed to fetch subjects: {e}")
+        return []
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def fetch_attendance(group_name, subject_name, selected_date=None, student_id=None):
+    try:
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
+        cursor = conn.cursor()
+
+        if selected_date:
+            query = """
+                SELECT
+                    u.username,
+                    s.subject_name,
+                    s.session_date,
+                    COUNT(a.id) AS total_sessions,
+                    SUM(a.status = 1) AS present_count,
+                    SUM(a.status = 0) AS absent_count,
+                    ROUND(SUM(a.status = 1) / COUNT(a.id) * 100, 2) AS attendance_percentage
+                FROM
+                    users u
+                JOIN
+                    attendance a ON u.user_id = a.student_id
+                JOIN
+                    attendance_session s ON a.session_id = s.id
+                WHERE
+                    s.group_name = %s
+                    AND s.subject_name = %s
+                    AND s.session_date = %s
+            """
+            params = [group_name, subject_name, selected_date]
+            if student_id:
+                query += " AND u.user_id = %s"
+                params.append(student_id)
+            query += " GROUP BY u.user_id, s.subject_name, s.session_date ORDER BY u.username"
+        else:
+            query = """
+                SELECT
+                    u.username,
+                    s.subject_name,
+                    NULL as session_date,
+                    COUNT(a.id) AS total_sessions,
+                    SUM(a.status = 1) AS present_count,
+                    SUM(a.status = 0) AS absent_count,
+                    ROUND(SUM(a.status = 1) / COUNT(a.id) * 100, 2) AS attendance_percentage
+                FROM
+                    users u
+                JOIN
+                    attendance a ON u.user_id = a.student_id
+                JOIN
+                    attendance_session s ON a.session_id = s.id
+                WHERE
+                    s.group_name = %s
+                    AND s.subject_name = %s
+            """
+            params = [group_name, subject_name]
+            if student_id:
+                query += " AND u.user_id = %s"
+                params.append(student_id)
+            query += " GROUP BY u.user_id, s.subject_name ORDER BY u.username"
+
+        cursor.execute(query, params)
         records = cursor.fetchall()
         return records
     except Error as e:
         messagebox.showerror("Database Error", f"Failed to fetch attendance: {e}")
+        return []
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def fetch_student_overall_percentage(student_id, subject_name):
+    try:
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
+        cursor = conn.cursor()
+        query = """
+            SELECT
+                u.username,
+                s.subject_name,
+                COUNT(a.id) AS total_sessions,
+                SUM(a.status = 1) AS present_count,
+                SUM(a.status = 0) AS absent_count,
+                ROUND(SUM(a.status = 1) / COUNT(a.id) * 100, 2) AS attendance_percentage
+            FROM
+                users u
+            JOIN
+                attendance a ON u.user_id = a.student_id
+            JOIN
+                attendance_session s ON a.session_id = s.id
+            WHERE
+                u.user_id = %s
+                AND s.subject_name = %s
+            GROUP BY
+                u.user_id, s.subject_name
+        """
+        params = [student_id, subject_name]
+        cursor.execute(query, params)
+        records = cursor.fetchall()
+        return records
+    except Error as e:
+        messagebox.showerror("Database Error", f"Failed to fetch student overall percentage: {e}")
         return []
     finally:
         if conn.is_connected():
@@ -161,6 +275,8 @@ def setup_styles():
     style.map('Danger.TButton', background=[('active', '#da190b')])
     style.configure('Warning.TButton', background='#ff9800', foreground='black')
     style.map('Warning.TButton', background=[('active', '#e68a00')])
+    style.configure('Success.TButton', background='#2196F3', foreground='white')
+    style.map('Success.TButton', background=[('active', '#1976D2')])
 
 def show_login_screen():
     clear_window(root)
@@ -372,8 +488,6 @@ def open_admin_portal():
             cursor.execute("SELECT username, role, group_name FROM users WHERE approved=0")
             users = cursor.fetchall()
 
-            print(f"Fetched {len(users)} pending users: {users}")
-
             student_users = [u for u in users if u[1] == "Student"]
             teacher_users = [u for u in users if u[1] == "Teacher"]
 
@@ -418,7 +532,6 @@ def open_admin_portal():
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET approved=1 WHERE username=%s", (username,))
             conn.commit()
-            print(f"Approved user: {username}")
             messagebox.showinfo("Success", f"User {username} approved.")
             update_user_lists()
         except Error as e:
@@ -432,12 +545,8 @@ def open_admin_portal():
         try:
             conn = mysql.connector.connect(**MYSQL_CONFIG)
             cursor = conn.cursor()
-            print(f"Attempting to decline user: {username}")
             cursor.execute("DELETE FROM users WHERE username=%s", (username,))
             conn.commit()
-            cursor.execute("SELECT username, role, group_name FROM users WHERE approved=0")
-            remaining = cursor.fetchall()
-            print(f"Remaining pending users after decline: {remaining}")
             messagebox.showinfo("Success", f"User {username} declined and removed.")
             update_user_lists()
         except Error as e:
@@ -453,7 +562,6 @@ def open_admin_portal():
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET approved=1 WHERE approved=0 AND role=%s", (role,))
             conn.commit()
-            print(f"Approved all {role}s")
             messagebox.showinfo("Success", f"All {role}s approved.")
             update_user_lists()
         except Error as e:
@@ -471,7 +579,6 @@ def open_admin_portal():
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM users WHERE approved=0 AND role=%s", (role,))
                 conn.commit()
-                print(f"Declined all {role}s")
                 messagebox.showinfo("Success", f"All {role}s declined and removed.")
                 update_user_lists()
             except Error as e:
@@ -536,8 +643,14 @@ def open_teacher_dashboard(username):
     try:
         conn = mysql.connector.connect(**MYSQL_CONFIG)
         cursor = conn.cursor()
-        cursor.execute("SELECT group_name FROM users WHERE username=%s", (username,))
-        teacher_group = cursor.fetchone()[0]
+        cursor.execute("SELECT group_name, user_id FROM users WHERE username=%s", (username,))
+        cursor_result = cursor.fetchone()
+        if cursor_result:
+            teacher_group = cursor_result[0]
+            teacher_id = cursor_result[1]
+        else:
+            messagebox.showerror("Error", "Teacher not found.")
+            return
     except Error as e:
         messagebox.showerror("Database Error", f"Failed to fetch group: {e}")
         return
@@ -553,10 +666,141 @@ def open_teacher_dashboard(username):
     ttk.Label(main_frame, text=f"Group Admin for: {teacher_group}", font=("Verdana", 18)).pack(pady=10)
 
     def take_group_attendance():
-        os.system(f"python face_recognition.py --teacher_username {username} --group_name {teacher_group}")
+        manage_window = tk.Toplevel(root)
+        manage_window.title("Attendance Manager")
+        manage_window.state('zoomed')
+        manage_window.configure(bg='#f0f0f0')
+        heading = tk.Label(manage_window, text=f"Manage Attendance: G {teacher_group}", font=("Arial", 24, "bold"), bg='#f0f0f0')
+        heading.pack(pady=40)
+        
+        subject_label_fill_attendance = tk.Label(manage_window, text="Enter Subject Name:", font=("Arial", 14), bg='#f0f0f0')
+        subject_label_fill_attendance.pack(pady=5)
+        subject_entry_fill_attendance = tk.Entry(manage_window, font=("Arial", 14), width=30)
+        subject_entry_fill_attendance.pack(pady=10)
+
+        notifica_label = ttk.Label(
+            manage_window,
+            text="",
+            style='TLabel',
+            width=40,
+        )
+        notifica_label.pack(pady=20)
+
+        def fill_attendance():
+            subject = subject_entry_fill_attendance.get().strip()
+            if not subject:
+                messagebox.showwarning("Input Required", "Please enter a subject name.")
+                return
+            try:
+                conn = mysql.connector.connect(**MYSQL_CONFIG)
+                cursor = conn.cursor()
+                notifica_label.configure(text=f"Filling attendance for subject: {subject}")
+
+                session_id = create_attendance_session(teacher_id, teacher_group, subject)
+
+                if not session_id:
+                    notifica_label.configure(text="Failed to create or fetch session ID.")
+                    return
+
+                def run_attendance_thread():
+                    present, absent = automaticAttendance.run_attendance(
+                        group_name=teacher_group,
+                        trainimagelabel_path=trainimagelabel_path,
+                        haarcasecade_path=haarcasecade_path,
+                        notifica_label=notifica_label
+                    )
+                    root.after(0, lambda: post_attendance(present, absent, session_id, notifica_label))
+
+                threading.Thread(target=run_attendance_thread, daemon=True).start()
+
+            except Exception as e:
+                notifica_label.configure(text=f"Failed to fill attendance: {e}")
+                print(f"Error: Failed to fill attendance: {e}")
+            finally:
+                if conn.is_connected():
+                    cursor.close()
+                    conn.close()
+
+        def post_attendance(present, absent, session_id, notifica_label):
+            try:
+                for student_id in present:
+                    mark_attendance(session_id, student_id, status=1)
+
+                for student_id in absent:
+                    mark_attendance(session_id, student_id, status=0)
+
+                notifica_label.configure(text="Attendance marked successfully.")
+                messagebox.showinfo("Attendance", "Attendance marked successfully.")
+
+            except Exception as e:
+                notifica_label.configure(text=f"Failed to mark attendance: {e}")
+                messagebox.showerror("Error", f"Failed to mark attendance: {e}")
+
+        def view_group_attendance():
+            show_attendance.subjectchoose(lambda msg: notifica_label.configure(text=msg), teacher_group)
+
+        def create_attendance_session(teacher_id, group_name, subject_name):
+            try:
+                conn = mysql.connector.connect(**MYSQL_CONFIG, connect_timeout=10)
+                cursor = conn.cursor()
+                today = datetime.now().date()
+
+                cursor.execute("""
+                    SELECT MAX(session_count)
+                    FROM attendance_session
+                    WHERE teacher_id=%s AND subject_name=%s AND group_name=%s AND session_date=%s
+                """, (teacher_id, subject_name, group_name, today))
+                result = cursor.fetchone()
+                current_count = result[0] if result[0] is not None else 0
+
+                cursor.execute("""
+                    INSERT INTO attendance_session 
+                    (teacher_id, subject_name, group_name, session_date, session_count)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (teacher_id, subject_name, group_name, today, current_count + 1))
+                
+                session_id = cursor.lastrowid
+                conn.commit()
+                print(f"Created Session ID: {session_id}, Session Count: {current_count + 1}")
+                return session_id
+
+            except Error as e:
+                print(f"Session Creation Error: {e}")
+                notifica_label.configure(text=f"Failed to create session: {e}")
+                return None
+            finally:
+                if conn.is_connected():
+                    cursor.close()
+                    conn.close()
+
+        def mark_attendance(session_id, student_id, status):
+            try:
+                conn = mysql.connector.connect(**MYSQL_CONFIG, connect_timeout=10)
+                cursor = conn.cursor()
+                today = datetime.now().date()
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                cursor.execute("""
+                    INSERT INTO attendance (session_id, student_id, status, date, timestamp)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (session_id, student_id, status, today, now))
+                print(f"Inserted attendance for student {student_id}, status: {status}")
+
+                conn.commit()
+            except Error as e:
+                print(f"Mark Attendance Error: {e}")
+                raise Exception(f"Failed to mark attendance for {student_id}: {e}")
+            finally:
+                if conn.is_connected():
+                    cursor.close()
+                    conn.close()
+
+        fill_attendance_btn = tk.Button(manage_window, text="Fill Attendance", font=("Arial", 16), width=20, height=2, bg="#4CAF50", fg="white", command=fill_attendance)
+        fill_attendance_btn.pack(pady=20)
+        view_attendance_btn = tk.Button(manage_window, text="View Attendance", font=("Arial", 16), width=20, height=2, bg="#2196F3", fg="white", command=view_group_attendance)
+        view_attendance_btn.pack(pady=10)
 
     def manage_group_members():
-        
         manage_window = tk.Toplevel(root)
         manage_window.title("Manage Group Members")
         manage_window.state('zoomed')
@@ -580,21 +824,18 @@ def open_teacher_dashboard(username):
             canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
             canvas.configure(yscrollcommand=scrollbar.set)
 
-            # Headings for student and other members
             student_frame = ttk.Frame(scrollable_frame)
             teacher_frame = ttk.Frame(scrollable_frame)
 
             student_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nw")
             teacher_frame.grid(row=0, column=1, padx=10, pady=10, sticky="ne")
 
-            # Student Table Headers
             ttk.Label(student_frame, text="Roll No", width=20, anchor="w", font=("Verdana", 12, "bold")).grid(row=0, column=0, padx=5, pady=5)
             ttk.Label(student_frame, text="Username", width=20, anchor="w", font=("Verdana", 12, "bold")).grid(row=0, column=1, padx=5, pady=5)
             ttk.Label(student_frame, text="Approved", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=2, padx=5, pady=5)
             ttk.Label(student_frame, text="Action", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=3, padx=5, pady=5)
             ttk.Label(student_frame, text="Train", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=4, padx=5, pady=5)
 
-            # Teacher Table Headers
             ttk.Label(teacher_frame, text="Username", width=20, anchor="w", font=("Verdana", 12, "bold")).grid(row=0, column=0, padx=5, pady=5)
             ttk.Label(teacher_frame, text="Role", width=10, anchor="w", font=("Verdana", 12, 'bold')).grid(row=0, column=1, padx=5, pady=5)
            
@@ -602,21 +843,19 @@ def open_teacher_dashboard(username):
             teacher_row = 1
 
             for user, role, approved, user_id in members:
-               approved_text = "Yes" if approved else "No"
-               if role.lower() == "student":
-                   ttk.Label(student_frame, text=user_id, width=20, anchor="w").grid(row=student_row, column=0, padx=5, pady=5)
-                   ttk.Label(student_frame, text=user, width=20, anchor="w").grid(row=student_row, column=1, padx=5, pady=5)
-                   ttk.Label(student_frame, text=approved_text, width=10, anchor="w").grid(row=student_row, column=2, padx=5, pady=5)
-                   if user != username:
-                       ttk.Button(student_frame, text="Remove", command=lambda u=user: remove_user(u, manage_window), style='Danger.TButton').grid(row=student_row, column=3, padx=5, pady=5)
-                       ttk.Button(student_frame, text="Train Image", command=lambda rn=user_id: take_and_train_image(rn), style='Success.TButton').grid(row=student_row, column=4, padx=5, pady=5)
-                   student_row += 1
-               else:
-                   ttk.Label(teacher_frame, text=user, width=20, anchor="w").grid(row=teacher_row, column=0, padx=5, pady=5)
-                   ttk.Label(teacher_frame, text=role, width=10, anchor="w").grid(row=teacher_row, column=1, padx=5, pady=5)
-                   teacher_row += 1
-
-
+                approved_text = "Yes" if approved else "No"
+                if role.lower() == "student":
+                    ttk.Label(student_frame, text=user_id, width=20, anchor="w").grid(row=student_row, column=0, padx=5, pady=5)
+                    ttk.Label(student_frame, text=user, width=20, anchor="w").grid(row=student_row, column=1, padx=5, pady=5)
+                    ttk.Label(student_frame, text=approved_text, width=10, anchor="w").grid(row=student_row, column=2, padx=5, pady=5)
+                    if user != username:
+                        ttk.Button(student_frame, text="Remove", command=lambda u=user: remove_user(u, manage_window), style='Danger.TButton').grid(row=student_row, column=3, padx=5, pady=5)
+                        ttk.Button(student_frame, text="Train Image", command=lambda rn=user_id: take_and_train_image(rn), style='Success.TButton').grid(row=student_row, column=4, padx=5, pady=5)
+                    student_row += 1
+                else:
+                    ttk.Label(teacher_frame, text=user, width=20, anchor="w").grid(row=teacher_row, column=0, padx=5, pady=5)
+                    ttk.Label(teacher_frame, text=role, width=10, anchor="w").grid(row=teacher_row, column=1, padx=5, pady=5)
+                    teacher_row += 1
 
             canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
             scrollbar.pack(side="right", fill="y")
@@ -626,24 +865,24 @@ def open_teacher_dashboard(username):
             if conn.is_connected():
                 cursor.close()
                 conn.close()
-                
+
     def take_and_train_image(roll_no):
         image_taken = takeImage.TakeImage(
             roll_no,
             teacher_group,
             haarcasecade_path,
             trainimage_path,
-            text_to_speech
+            lambda msg: messagebox.showinfo("Info", msg)
         )
         if image_taken:
             trainImage.TrainImage(
                 haarcasecade_path,
                 trainimage_path,
                 trainimagelabel_path,
-                text_to_speech,
+                lambda msg: messagebox.showinfo("Info", msg)
             )
         else:
-            text_to_speech("ERROR IN CAPTURING IMAGE")
+            messagebox.showerror("Error", "Error in capturing image")
 
     def remove_user(username_to_remove, window):
         confirm = messagebox.askyesno("Confirm", f"Remove {username_to_remove} from group?")
@@ -657,6 +896,7 @@ def open_teacher_dashboard(username):
                 user_id = result[0]
                 user_folder_path = os.path.join(trainimage_path, user_id)
 
+                cursor.execute("DELETE FROM attendance WHERE student_id=%s", (user_id,))
                 cursor.execute("DELETE FROM users WHERE username=%s", (username_to_remove,))
                 conn.commit()
                 
@@ -743,19 +983,175 @@ def open_student_dashboard(username):
     try:
         conn = mysql.connector.connect(**MYSQL_CONFIG)
         cursor = conn.cursor()
-        cursor.execute("SELECT group_name FROM users WHERE username=%s", (username,))
-        student_group = cursor.fetchone()[0]
+        cursor.execute("SELECT group_name, user_id FROM users WHERE username=%s", (username,))
+        result = cursor.fetchone()
+        if not result:
+            messagebox.showerror("Error", "User not found.")
+            return
+        student_group, student_id = result
         
         main_frame = ttk.Frame(root)
         main_frame.place(relx=0.5, rely=0.5, anchor='center')
         
         ttk.Label(main_frame, text=f"Welcome, {username}", font=("Verdana", 24, 'bold')).pack(pady=20)
         ttk.Label(main_frame, text=f"Group: {student_group}", font=("Verdana", 18)).pack(pady=10)
+
+        notification_label = ttk.Label(main_frame, text="", font=("Verdana", 12), foreground="red", background='#f0f0f0')
+        notification_label.pack(pady=10)
+
+        subjects = fetch_subjects(student_id=student_id)
+        if not subjects:
+            notification_label.config(text="No subjects found for you.")
+            return
+
+        ttk.Label(main_frame, text="Select Subject:", font=("Verdana", 14)).pack(pady=10)
+        subject_var = tk.StringVar()
+        subject_dropdown = ttk.Combobox(main_frame, textvariable=subject_var, values=subjects, state='readonly', width=30, font=('Verdana', 12))
+        subject_dropdown.pack(pady=10)
+        subject_dropdown.current(0)
+
+        ttk.Label(main_frame, text="Select Date:", font=("Verdana", 14)).pack(pady=10)
+        date_entry = DateEntry(main_frame, width=30, font=('Verdana', 12), date_pattern='yyyy-mm-dd', maxdate=datetime.now())
+        date_entry.pack(pady=10)
+
+        def show_student_attendance(selected_date=None):
+            notification_label.config(text="")
+
+            subject = subject_var.get()
+            if not subject:
+                notification_label.config(text="Please select a subject.")
+                return
+
+            date_str = selected_date if selected_date else (date_entry.get() if not selected_date else None)
+            if date_str and selected_date is None:
+                try:
+                    datetime.strptime(date_str, '%Y-%m-%d')
+                except ValueError:
+                    notification_label.config(text="Invalid date format. Please select a valid date.")
+                    return
+
+            records = fetch_attendance(student_group, subject, date_str, student_id)
+            if not records:
+                if date_str:
+                    notification_label.config(text=f"No data found for {subject} on {date_str}.")
+                else:
+                    notification_label.config(text=f"No data found for {subject}.")
+                return
+
+            table_window = tk.Toplevel(root)
+            table_window.title(f"Attendance for {subject}" + (f" on {date_str}" if date_str else ""))
+            table_window.state('zoomed')
+            table_window.configure(bg='#f0f0f0')
+
+            headers = ["Username", "Subject", "Date", "Total Sessions", "Present", "Absent", "Attendance %"]
+            for c, header in enumerate(headers):
+                label = tk.Label(
+                    table_window,
+                    width=10,
+                    height=1,
+                    fg="black",
+                    font=("times", 11, "bold"),
+                    bg="#f0f0f0",
+                    text=header,
+                    relief=tk.RIDGE,
+                )
+                label.grid(row=0, column=c, padx=2, pady=2)
+
+            for r, record in enumerate(records, start=1):
+                display_row = [
+                    record[0],  
+                    record[1],  
+                    record[2],  
+                    record[3],  
+                    record[4],  
+                    record[5], 
+                    f"{float(record[6]):.2f}%"  
+                ]
+                for c, field in enumerate(display_row):
+                    bg_color = "#f0f0f0"
+                    if c == 6:
+                        percentage = float(record[6])
+                        if percentage >= 75:
+                            bg_color = "#90EE90"
+                        elif percentage >= 50:
+                            bg_color = "#FFD700"
+                        else:
+                            bg_color = "#FFB6C1"
+                    label = tk.Label(
+                        table_window,
+                        width=10,
+                        height=1,
+                        fg="black",
+                        font=("times", 11),
+                        bg=bg_color,
+                        text=field,
+                        relief=tk.RIDGE,
+                    )
+                    label.grid(row=r, column=c, padx=2, pady=2)
+            notification_label.config(text=f"Showing attendance for {subject}" + (f" on {date_str}" if date_str else " for all dates."))
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=20)
+        ttk.Button(button_frame, text="Show Attendance", command=lambda: show_student_attendance(), style='Primary.TButton').pack(side="left", padx=10)
         
-        attendance_records = fetch_attendance(username)
-        attendance_text = "Date\tStatus\tSubject\tCount\n" + "\n".join([f"{date}\t{status}\t{subject}\t{count}" for date, status, subject, count in attendance_records])
-        attendance_label = ttk.Label(main_frame, text=attendance_text, font=("Verdana", 14), justify='left')
-        attendance_label.pack(pady=20)
+        def show_student_percentage():
+            subject = subject_var.get()
+            if not subject:
+                notification_label.config(text="Please select a subject.")
+                return
+            records = fetch_student_overall_percentage(student_id, subject)
+            if not records:
+                notification_label.config(text=f"No data found for {subject}.")
+                return
+            table_window = tk.Toplevel(root)
+            table_window.title(f"Overall Percentage for {subject}")
+            table_window.state('zoomed')
+            table_window.configure(bg='#f0f0f0')
+            headers = ["Username", "Subject", "Total Sessions", "Present", "Absent", "Attendance %"]
+            for c, header in enumerate(headers):
+                label = tk.Label(
+                    table_window,
+                    width=10,
+                    height=1,
+                    fg="black",
+                    font=("times", 11, "bold"),
+                    bg="#f0f0f0",
+                    text=header,
+                    relief=tk.RIDGE,
+                )
+                label.grid(row=0, column=c, padx=2, pady=2)
+            for r, record in enumerate(records, start=1):
+                display_row = [
+                    record[0], 
+                    record[1], 
+                    record[2], 
+                    record[3],
+                    record[4], 
+                    f"{float(record[5]):.2f}%" 
+                ]
+                for c, field in enumerate(display_row):
+                    bg_color = "#f0f0f0"
+                    if c == 5:
+                        percentage = float(record[5])
+                        if percentage >= 75:
+                            bg_color = "#90EE90"
+                        elif percentage >= 50:
+                            bg_color = "#FFD700"
+                        else:
+                            bg_color = "#FFB6C1"
+                    label = tk.Label(
+                        table_window,
+                        width=10,
+                        height=1,
+                        fg="black",
+                        font=("times", 11),
+                        bg=bg_color,
+                        text=field,
+                        relief=tk.RIDGE,
+                    )
+                    label.grid(row=r, column=c, padx=2, pady=2)
+            notification_label.config(text=f"Showing overall percentage for {subject}.")
+        ttk.Button(button_frame, text="Show Percentage", command=show_student_percentage, style='Primary.TButton').pack(side="left", padx=10)
     except Error as e:
         messagebox.showerror("Database Error", f"Failed to load dashboard: {e}")
     finally:

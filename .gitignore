@@ -4,3 +4,5 @@ __pycache__
 StudentDetails/
 TrainingImage/
 venv/
+db.txt
+run.txt
