@@ -1,12 +1,11 @@
-.vscode
-.idea
-__pycache__
-StudentDetails/
+.vscode/
+.idea/
+__pycache__/
 TrainingImage/
 venv/
 db.txt
 run.txt
-sample.py 
+sample.py
 _config.yml
 bash.exe.stackdump
 haarcascade_frontalface_alt.xml
